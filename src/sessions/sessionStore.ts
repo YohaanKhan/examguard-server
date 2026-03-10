@@ -44,6 +44,8 @@ export type Session = {
 // ---------------------------------------------------------------------------
 const SUSPICION_PASTE_WEIGHT = 40;
 const SUSPICION_FOCUS_WEIGHT = 20;
+const SUSPICION_FULLSCREEN_EXIT_WEIGHT = 10;
+const SUSPICION_FULLSCREEN_BLOCK_WEIGHT = 25;
 const MAX_SUSPICION_SCORE = 100;
 
 // ---------------------------------------------------------------------------
@@ -122,7 +124,12 @@ class SessionStore {
         session.events.push(event);
 
         // Recalculate and broadcast when a score-affecting event arrives
-        if (event.type === 'PASTE' || event.type === 'FOCUS_LOST') {
+        if (
+            event.type === 'PASTE' ||
+            event.type === 'FOCUS_LOST' ||
+            event.type === 'FULLSCREEN_EXIT' ||
+            event.type === 'FULLSCREEN_BLOCKED'
+        ) {
             this.recalculateScore(session);
             this.broadcastUpdate();
         }
@@ -202,8 +209,15 @@ class SessionStore {
     private recalculateScore(session: Session): void {
         const pasteCount = session.events.filter(e => e.type === 'PASTE').length;
         const focusLossCount = session.events.filter(e => e.type === 'FOCUS_LOST').length;
+        const fullscreenExits = session.events.filter(e => e.type === 'FULLSCREEN_EXIT').length;
+        const fullscreenBlocked = session.events.filter(e => e.type === 'FULLSCREEN_BLOCKED').length;
 
-        const raw = (pasteCount * SUSPICION_PASTE_WEIGHT) + (focusLossCount * SUSPICION_FOCUS_WEIGHT);
+        const raw =
+            (pasteCount * SUSPICION_PASTE_WEIGHT) +
+            (focusLossCount * SUSPICION_FOCUS_WEIGHT) +
+            (fullscreenExits * SUSPICION_FULLSCREEN_EXIT_WEIGHT) +
+            (fullscreenBlocked * SUSPICION_FULLSCREEN_BLOCK_WEIGHT);
+
         session.suspicionScore = Math.min(raw, MAX_SUSPICION_SCORE);
 
         console.log(`[SessionStore] ${session.studentId} suspicion score: ${session.suspicionScore}`);

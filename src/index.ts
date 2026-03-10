@@ -1,5 +1,6 @@
 import express from 'express';
 import { createServer } from 'http';
+import path from 'path';
 import { createWebSocketServer } from './ws/wsHandler';
 import { authRouter } from './routes/auth';
 import { telemetryRouter } from './routes/telemetry';
@@ -20,6 +21,9 @@ app.use(express.json());
 /** Mount routers */
 app.use(authRouter());
 app.use(telemetryRouter());
+
+/** Serve the teacher dashboard at /dashboard */
+app.use('/dashboard', express.static(path.join(__dirname, 'dashboard')));
 
 /**
  * Health check endpoint.

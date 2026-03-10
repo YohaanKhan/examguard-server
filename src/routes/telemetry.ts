@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { sessionStore } from '../sessions/sessionStore';
+import { generateSessionPdf } from '../pdf/pdfExporter';
 
 /**
  * Router for all session and telemetry endpoints.
@@ -76,6 +77,31 @@ export function telemetryRouter(): Router {
         } catch (err) {
             console.error('[Routes] Peer comparison failed:', err);
             res.status(500).json({ error: 'Peer comparison failed.' });
+        }
+    });
+
+    /**
+     * GET /api/sessions/:id/export/pdf
+     * Generates and streams a PDF report for a student's session.
+     * The browser receives it as a file download.
+     */
+    router.get('/api/sessions/:id/export/pdf', async (req: Request, res: Response) => {
+        const session = sessionStore.getSession(String(req.params.id));
+        if (!session) {
+            res.status(404).json({ error: `No session found for studentId: ${req.params.id}` });
+            return;
+        }
+
+        try {
+            const { ws: _ws, ...safeSession } = session;
+            const pdfBuffer = await generateSessionPdf(safeSession);
+
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename=examguard-${session.studentId}.pdf`);
+            res.send(pdfBuffer);
+        } catch (err) {
+            console.error('[Routes] PDF generation failed:', err);
+            res.status(500).json({ error: 'Failed to generate PDF.' });
         }
     });
 
