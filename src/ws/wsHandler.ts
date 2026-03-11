@@ -18,7 +18,7 @@ export function createWebSocketServer(server: Server): WebSocketServer {
 
     const wss = new WebSocketServer({ server });
 
-    wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
+    wss.on('connection', async (ws: WebSocket, req: IncomingMessage) => {
 
         const params = new URL(req.url!, 'http://localhost').searchParams;
         const role = params.get('role');
@@ -43,9 +43,10 @@ export function createWebSocketServer(server: Server): WebSocketServer {
         // ------------------------------------------------------------------
         // Student extension client
         // ------------------------------------------------------------------
-        if (!validateExamCode(examCode)) {
-            console.warn(`[WS] Rejected student connection with invalid exam code: ${examCode}`);
-            ws.close(1008, 'Invalid exam code');
+        const authStatus = await validateExamCode(examCode);
+        if (!authStatus.isValid) {
+            console.warn(`[WS] Rejected student connection with invalid or inactive exam code (${authStatus.reason}): ${examCode}`);
+            ws.close(1008, `Student Auth Error: ${authStatus.reason || 'Invalid exam code'}`);
             return;
         }
 

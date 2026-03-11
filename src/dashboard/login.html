@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login | ExamGuard Teacher Portal</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0d1117;
+            --surface: #161b22;
+            --border: #30363d;
+            --text: #e6edf3;
+            --muted: #7d8590;
+            --accent: #388bfd;
+            --red: #f85149;
+            --radius: 8px;
+            --tran: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .login-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            width: 360px;
+            padding: 32px;
+            box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+            animation: slideUp 0.6s var(--tran);
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .brand {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 32px;
+        }
+
+        .brand svg {
+            color: var(--accent);
+        }
+
+        .brand h1 {
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 24px;
+        }
+
+        .form-group label {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--muted);
+        }
+
+        .form-input {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 12px;
+            border-radius: var(--radius);
+            font-size: 14px;
+            outline: none;
+            transition: all var(--tran);
+            text-align: center;
+            letter-spacing: 4px;
+        }
+
+        .form-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(56, 139, 253, 0.1);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 12px;
+            border-radius: var(--radius);
+            border: none;
+            background: var(--accent);
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all var(--tran);
+        }
+
+        .btn:hover {
+            filter: brightness(1.1);
+            transform: translateY(-1px);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .error-msg {
+            color: var(--red);
+            font-size: 13px;
+            text-align: center;
+            margin-top: 16px;
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="login-card">
+        <div class="brand">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+            <h1>Teacher Portal</h1>
+        </div>
+
+        <div class="form-group">
+            <label>Administrative Password</label>
+            <input type="password" id="password" class="form-input" placeholder="••••••••" autofocus>
+        </div>
+
+        <button class="btn" id="login-btn">Sign In</button>
+        <div class="error-msg" id="error">Invalid password. Access denied.</div>
+    </div>
+
+    <script>
+        const btn = document.getElementById('login-btn');
+        const input = document.getElementById('password');
+        const error = document.getElementById('error');
+
+        async function doLogin() {
+            const pass = input.value;
+            if (!pass) return;
+
+            btn.innerHTML = 'Verifying...';
+            btn.disabled = true;
+            error.style.display = 'none';
+
+            try {
+                const res = await fetch('/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: pass })
+                });
+
+                if (res.ok) {
+                    location.href = '/dashboard/index.html';
+                } else {
+                    error.style.display = 'block';
+                    btn.innerHTML = 'Sign In';
+                    btn.disabled = false;
+                }
+            } catch (e) {
+                console.error(e);
+                btn.innerHTML = 'Sign In';
+                btn.disabled = false;
+            }
+        }
+
+        btn.onclick = doLogin;
+        input.onkeydown = e => { if (e.key === 'Enter') doLogin(); };
+    </script>
+</body>
+
+</html>

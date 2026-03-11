@@ -26,7 +26,7 @@ export function telemetryRouter(): Router {
      * Returns a summary of all active student sessions.
      * Used by the teacher dashboard live overview table.
      */
-    router.get('/api/sessions', (_req: Request, res: Response) => {
+    router.get('/sessions', (_req: Request, res: Response) => {
         res.json(sessionStore.getAllSessions());
     });
 
@@ -34,7 +34,7 @@ export function telemetryRouter(): Router {
      * GET /api/sessions/:id
      * Returns the full session detail for one student — events, snapshots, score.
      */
-    router.get('/api/sessions/:id', (req: Request, res: Response) => {
+    router.get('/sessions/:id', (req: Request, res: Response) => {
         const session = sessionStore.getSession(String(req.params.id));
         if (!session) {
             res.status(404).json({ error: `No session found for studentId: ${req.params.id}` });
@@ -49,7 +49,7 @@ export function telemetryRouter(): Router {
      * GET /api/sessions/:id/replay
      * Returns the ordered array of snapshots for the replay scrubber.
      */
-    router.get('/api/sessions/:id/replay', (req: Request, res: Response) => {
+    router.get('/sessions/:id/replay', (req: Request, res: Response) => {
         const session = sessionStore.getSession(String(req.params.id));
         if (!session) {
             res.status(404).json({ error: `No session found for studentId: ${req.params.id}` });
@@ -63,7 +63,7 @@ export function telemetryRouter(): Router {
      * Marks an exam as ended and triggers peer comparison.
      * Peer comparison runs asynchronously — the result is stored on the session store.
      */
-    router.post('/api/sessions/:id/end', async (req: Request, res: Response) => {
+    router.post('/sessions/:id/end', async (req: Request, res: Response) => {
         const session = sessionStore.getSession(String(req.params.id));
         if (!session) {
             res.status(404).json({ error: `No session found for studentId: ${req.params.id}` });
@@ -85,7 +85,7 @@ export function telemetryRouter(): Router {
      * Allows a teacher to explicitly permit a disconnected student to rejoin
      * regardless of how long they've been offline.
      */
-    router.post('/api/sessions/:id/allow-rejoin', (req: Request, res: Response) => {
+    router.post('/sessions/:id/allow-rejoin', (req: Request, res: Response) => {
         const studentId = String(req.params.id);
         const success = sessionStore.allowRejoin(studentId);
 
@@ -101,7 +101,7 @@ export function telemetryRouter(): Router {
      * Generates and streams a PDF report for a student's session.
      * The browser receives it as a file download.
      */
-    router.get('/api/sessions/:id/export/pdf', async (req: Request, res: Response) => {
+    router.get('/sessions/:id/export/pdf', async (req: Request, res: Response) => {
         const session = sessionStore.getSession(String(req.params.id));
         if (!session) {
             res.status(404).json({ error: `No session found for studentId: ${req.params.id}` });
@@ -132,7 +132,7 @@ export function telemetryRouter(): Router {
      * @body studentId - The student sending the event
      * @body event     - The telemetry event object
      */
-    router.post('/api/telemetry/event', (req: Request, res: Response) => {
+    router.post('/telemetry/event', (req: Request, res: Response) => {
         const { studentId, event } = req.body;
         if (!studentId || !event) {
             res.status(400).json({ error: 'studentId and event are required' });
@@ -149,7 +149,7 @@ export function telemetryRouter(): Router {
      * @body studentId - The student sending the snapshot
      * @body snapshot  - The snapshot object (type, timeStamp, file, content)
      */
-    router.post('/api/telemetry/snapshot', (req: Request, res: Response) => {
+    router.post('/telemetry/snapshot', (req: Request, res: Response) => {
         const { studentId, snapshot } = req.body;
         if (!studentId || !snapshot) {
             res.status(400).json({ error: 'studentId and snapshot are required' });
@@ -157,6 +157,21 @@ export function telemetryRouter(): Router {
         }
         sessionStore.addSnapshot(studentId, snapshot);
         res.json({ success: true });
+    });
+
+    /**
+     * DELETE /api/sessions/:id
+     * Allows a teacher to forcefully clear a student's session (e.g. if their laptop completely crashed).
+     */
+    router.delete('/sessions/:id', (req: Request, res: Response) => {
+        const studentId = req.params.id as string;
+        if (!studentId) {
+            res.status(400).json({ success: false, message: 'studentId is required.' });
+            return;
+        }
+
+        sessionStore.deleteSession(studentId);
+        res.json({ success: true, message: `Session cleared for ${studentId}` });
     });
 
     return router;

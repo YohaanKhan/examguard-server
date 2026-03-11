@@ -165,6 +165,25 @@ class SessionStore {
     }
 
     /**
+     * Removes all student sessions associated with a specific exam code from server memory.
+     * Used when an exam is deleted or wiped by a teacher.
+     */
+    clearExamSessions(examCode: string): void {
+        const toDeleteIds: string[] = [];
+        for (const [studentId, session] of this.sessions.entries()) {
+            if (session.examCode === examCode) {
+                if (session.ws) {
+                    session.ws.close(1008, 'Exam cleared by teacher');
+                }
+                toDeleteIds.push(studentId);
+            }
+        }
+        toDeleteIds.forEach(id => this.sessions.delete(id));
+        console.log(`[SessionStore] Purged ${toDeleteIds.length} sessions for exam ${examCode}`);
+        this.broadcastUpdate();
+    }
+
+    /**
      * Marks a student's session as disconnected by nulling the `ws` reference
      * and recording the disconnection time.
      *
