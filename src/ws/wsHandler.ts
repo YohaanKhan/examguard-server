@@ -1,6 +1,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { IncomingMessage, Server } from 'http';
 import { sessionStore, Snapshot, TelemetryEvent } from '../sessions/sessionStore';
+import { validateExamCode } from '../routes/auth';
 
 /**
  * Creates a WebSocket server attached to the existing Express HTTP server.
@@ -42,8 +43,17 @@ export function createWebSocketServer(server: Server): WebSocketServer {
         // ------------------------------------------------------------------
         // Student extension client
         // ------------------------------------------------------------------
-        sessionStore.createSession(studentId, examCode, ws);
-        console.log(`[WS] Student connected: ${studentId} — Exam: ${examCode}`);
+        if (!validateExamCode(examCode)) {
+            console.warn(`[WS] Rejected student connection with invalid exam code: ${examCode}`);
+            ws.close(1008, 'Invalid exam code');
+            return;
+        }
+
+        const result = sessionStore.createSession(studentId, examCode, ws);
+        if (!result.success) {
+            ws.close(1008, result.reason || 'Connection rejected');
+            return;
+        }
 
         ws.on('message', (data) => {
             try {

@@ -35,6 +35,10 @@ export type Session = {
     events: TelemetryEvent[];
     snapshots: Snapshot[];
     suspicionScore: number;
+    /** Timestamp when the student last disconnected. null if active. */
+    disconnectedAt: number | null;
+    /** Whether a teacher has explicitly allowed this student to bypass the 2-minute reconnect limit */
+    allowLateRejoin?: boolean;
     /** Live WebSocket to the student's extension — null if disconnected */
     ws: WebSocket | null;
 };
@@ -46,6 +50,7 @@ const SUSPICION_PASTE_WEIGHT = 40;
 const SUSPICION_FOCUS_WEIGHT = 20;
 const SUSPICION_FULLSCREEN_EXIT_WEIGHT = 10;
 const SUSPICION_FULLSCREEN_BLOCK_WEIGHT = 25;
+const SUSPICION_MACRO_WEIGHT = 15;
 const MAX_SUSPICION_SCORE = 100;
 
 // ---------------------------------------------------------------------------
@@ -68,18 +73,59 @@ class SessionStore {
     // -----------------------------------------------------------------------
 
     /**
-     * Creates a new session for a student, storing their live WebSocket reference.
-     * Called by the WebSocket handler as soon as a student connects.
+     * Creates or resumes a session for a student.
      *
      * @param studentId - Unique student identifier e.g. 's12345678'
      * @param examCode  - Exam code the student authenticated with
      * @param ws        - The live WebSocket to the student's extension
+     * @returns Object indicating success, and a reason string if blocked
      */
-    createSession(studentId: string, examCode: string, ws: WebSocket): void {
+    createSession(studentId: string, examCode: string, ws: WebSocket): { success: boolean; reason?: string } {
+        const existing = this.sessions.get(studentId);
+
+        if (existing) {
+            if (existing.ws) {
+                console.warn(`[SessionStore] Blocked duplicate connection for ${studentId}`);
+                return { success: false, reason: 'Session already active on another machine or window' };
+            } else {
+                // Check if they exceeded the 2 minute grace period
+                if (existing.disconnectedAt && !existing.allowLateRejoin) {
+                    const timeOffline = Date.now() - existing.disconnectedAt;
+                    if (timeOffline > 2 * 60 * 1000) { // 2 minutes
+                        console.warn(`[SessionStore] Blocked late reconnect for ${studentId} (offline for ${Math.round(timeOffline / 1000)}s)`);
+                        return { success: false, reason: 'Reconnection window expired. You were disconnected for more than 2 minutes. Ask your teacher to allow rejoin.' };
+                    }
+                }
+
+                // Reattach genuine reconnect
+                if (existing.disconnectedAt && !existing.allowLateRejoin) {
+                    const timeOffline = Date.now() - existing.disconnectedAt;
+                    // For every 10 seconds offline, add 5 suspicion points (max 60 for the 120s limit)
+                    const penaltyPoints = Math.floor(timeOffline / 10000) * 5;
+                    if (penaltyPoints > 0) {
+                        existing.events.push({
+                            type: 'DISCONNECT_PENALTY',
+                            timeStamp: Date.now(),
+                            penalty: penaltyPoints
+                        });
+                        console.log(`[SessionStore] Applied +${penaltyPoints} penalty to ${studentId} for being offline ${Math.round(timeOffline / 1000)}s`);
+                    }
+                }
+
+                existing.ws = ws;
+                existing.disconnectedAt = null;
+                existing.allowLateRejoin = false; // Reset the flag once they successfully join
+                this.recalculateScore(existing); // Apply the disconnect penalty immediately
+                console.log(`[SessionStore] Session resumed — ${studentId} (${examCode})`);
+                return { success: true };
+            }
+        }
+
         const session: Session = {
             studentId,
             examCode,
             joinedAt: Date.now(),
+            disconnectedAt: null,
             events: [],
             snapshots: [],
             suspicionScore: 0,
@@ -87,11 +133,40 @@ class SessionStore {
         };
         this.sessions.set(studentId, session);
         console.log(`[SessionStore] Session created — ${studentId} (${examCode})`);
+        return { success: true };
     }
 
     /**
-     * Marks a student's session as disconnected by nulling the `ws` reference.
-     * Session data is preserved for the teacher to review post-exam.
+     * Completely deletes a session and clears all its history.
+     * Used by teachers to explicitly override a stuck or genuinely crashed session.
+     */
+    deleteSession(studentId: string): void {
+        const session = this.sessions.get(studentId);
+        if (session && session.ws) {
+            session.ws.close(1008, 'Session reset by teacher');
+        }
+        this.sessions.delete(studentId);
+        console.log(`[SessionStore] Session completely deleted — ${studentId}`);
+        this.broadcastUpdate();
+    }
+
+    /**
+     * Explicitly permits a disconnected student to reconnect regardless of how long they've been offline.
+     */
+    allowRejoin(studentId: string): boolean {
+        const session = this.sessions.get(studentId);
+        if (session && !session.ws) {
+            session.allowLateRejoin = true;
+            console.log(`[SessionStore] Teacher explicitly allowed late rejoin for ${studentId}`);
+            this.broadcastUpdate();
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Marks a student's session as disconnected by nulling the `ws` reference
+     * and recording the disconnection time.
      *
      * @param studentId - The student who disconnected
      */
@@ -99,7 +174,8 @@ class SessionStore {
         const session = this.sessions.get(studentId);
         if (session) {
             session.ws = null;
-            console.log(`[SessionStore] ${studentId} disconnected — session data preserved`);
+            session.disconnectedAt = Date.now();
+            console.log(`[SessionStore] ${studentId} disconnected — session data preserved (grace period started)`);
         }
     }
 
@@ -128,7 +204,9 @@ class SessionStore {
             event.type === 'PASTE' ||
             event.type === 'FOCUS_LOST' ||
             event.type === 'FULLSCREEN_EXIT' ||
-            event.type === 'FULLSCREEN_BLOCKED'
+            event.type === 'FULLSCREEN_BLOCKED' ||
+            event.type === 'SUSPICIOUS_CADENCE' ||
+            event.type === 'EXAM_SUBMITTED'
         ) {
             this.recalculateScore(session);
             this.broadcastUpdate();
@@ -211,12 +289,16 @@ class SessionStore {
         const focusLossCount = session.events.filter(e => e.type === 'FOCUS_LOST').length;
         const fullscreenExits = session.events.filter(e => e.type === 'FULLSCREEN_EXIT').length;
         const fullscreenBlocked = session.events.filter(e => e.type === 'FULLSCREEN_BLOCKED').length;
+        const macroCount = session.events.filter(e => e.type === 'SUSPICIOUS_CADENCE').length;
+        const disconnectPenalty = session.events.filter(e => e.type === 'DISCONNECT_PENALTY').reduce((sum, e) => sum + ((e.penalty as number) || 0), 0);
 
         const raw =
             (pasteCount * SUSPICION_PASTE_WEIGHT) +
             (focusLossCount * SUSPICION_FOCUS_WEIGHT) +
             (fullscreenExits * SUSPICION_FULLSCREEN_EXIT_WEIGHT) +
-            (fullscreenBlocked * SUSPICION_FULLSCREEN_BLOCK_WEIGHT);
+            (fullscreenBlocked * SUSPICION_FULLSCREEN_BLOCK_WEIGHT) +
+            (macroCount * SUSPICION_MACRO_WEIGHT) +
+            disconnectPenalty;
 
         session.suspicionScore = Math.min(raw, MAX_SUSPICION_SCORE);
 

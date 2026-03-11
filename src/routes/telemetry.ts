@@ -81,6 +81,22 @@ export function telemetryRouter(): Router {
     });
 
     /**
+     * POST /api/sessions/:id/allow-rejoin
+     * Allows a teacher to explicitly permit a disconnected student to rejoin
+     * regardless of how long they've been offline.
+     */
+    router.post('/api/sessions/:id/allow-rejoin', (req: Request, res: Response) => {
+        const studentId = String(req.params.id);
+        const success = sessionStore.allowRejoin(studentId);
+
+        if (success) {
+            res.json({ success: true, message: `${studentId} is now allowed to rejoin.` });
+        } else {
+            res.status(404).json({ success: false, message: `No disconnected session found for ${studentId}.` });
+        }
+    });
+
+    /**
      * GET /api/sessions/:id/export/pdf
      * Generates and streams a PDF report for a student's session.
      * The browser receives it as a file download.
@@ -97,7 +113,7 @@ export function telemetryRouter(): Router {
             const pdfBuffer = await generateSessionPdf(safeSession);
 
             res.setHeader('Content-Type', 'application/pdf');
-            res.setHeader('Content-Disposition', `attachment; filename=examguard-${session.studentId}.pdf`);
+            res.setHeader('Content-Disposition', `attachment; filename="examguard-${session.studentId}.pdf"`);
             res.send(pdfBuffer);
         } catch (err) {
             console.error('[Routes] PDF generation failed:', err);
