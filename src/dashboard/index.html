@@ -1221,7 +1221,8 @@
         let sessions = [], examsList = [], currentStudentId = null, scoreChart = null, currentSnapshots = [];
 
         function connectDashboard() {
-            const ws = new WebSocket(`ws://${location.hostname}:3000?role=dashboard`);
+            const port = location.port ? `:${location.port}` : '';
+            const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.hostname}${port}?role=dashboard`);
             const dot = document.getElementById('ws-dot'), label = document.getElementById('ws-label');
             ws.addEventListener('open', () => { dot.classList.add('connected'); label.textContent = 'Live'; fetchDashData() });
             ws.addEventListener('message', (evt) => {
