@@ -2,7 +2,7 @@
 
 The central backend infrastructure for the **ExamGuard** ecosystem. It acts as the command center, continuously ingesting high-frequency telemetry from students running the **TryCheat** VS Code Extension.
 
-## 🚀 Core Features
+## Core Features
 
 ### 1. Robust Real-time WebSocket Engine
 Handles concurrent, continuous WebSocket streams (`src/ws/wsHandler.ts`) from multiple students without dropping packets. It re-establishes broken connections and immediately flags abnormal network instability or disconnects.
@@ -21,7 +21,7 @@ Provides RESTful HTTP routes (`src/routes/adminRoutes.ts`) heavily protected by 
 
 ---
 
-## 🛠️ Architecture and How it Works
+## Architecture and How it Works
 
 1. **Initialization:** The Express.js server starts up and binds a WebSocket Server (`ws`) to the exact same HTTP port.
 2. **Handshake:** Students connect and negotiate authentication. Once verified, a persistent session profile is created for them in the Session Store.
@@ -30,7 +30,7 @@ Provides RESTful HTTP routes (`src/routes/adminRoutes.ts`) heavily protected by 
 
 ---
 
-## 📥 Prerequisites & Setup
+## Prerequisites & Setup
 
 - Node.js (v18 or higher recommended)
 - npm or yarn
