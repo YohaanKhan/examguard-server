@@ -59,6 +59,20 @@ export function telemetryRouter(): Router {
     });
 
     /**
+     * GET /api/sessions/:id/screenshots
+     * Returns the ordered array of screenshot events for the screenshot viewer.
+     * Each success entry includes a base64-encoded JPEG; failures include a reason only.
+     */
+    router.get('/sessions/:id/screenshots', (req: Request, res: Response) => {
+        const session = sessionStore.getSession(String(req.params.id));
+        if (!session) {
+            res.status(404).json({ error: `No session found for studentId: ${req.params.id}` });
+            return;
+        }
+        res.json(session.screenshots);
+    });
+
+    /**
      * POST /api/sessions/:id/end
      * Marks an exam as ended and triggers peer comparison.
      * Peer comparison runs asynchronously — the result is stored on the session store.
@@ -156,6 +170,23 @@ export function telemetryRouter(): Router {
             return;
         }
         sessionStore.addSnapshot(studentId, snapshot);
+        res.json({ success: true });
+    });
+
+    /**
+     * POST /api/telemetry/screenshot
+     * Accepts a screenshot event from the extension as an HTTP fallback.
+     *
+     * @body studentId  - The student sending the screenshot
+     * @body screenshot - The screenshot event (type, timeStamp, image?, bytes?, truncated?, reason?)
+     */
+    router.post('/telemetry/screenshot', (req: Request, res: Response) => {
+        const { studentId, screenshot } = req.body;
+        if (!studentId || !screenshot) {
+            res.status(400).json({ error: 'studentId and screenshot are required' });
+            return;
+        }
+        sessionStore.addScreenshot(studentId, screenshot);
         res.json({ success: true });
     });
 

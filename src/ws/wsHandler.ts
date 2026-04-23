@@ -1,6 +1,6 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { IncomingMessage, Server } from 'http';
-import { sessionStore, Snapshot, TelemetryEvent } from '../sessions/sessionStore';
+import { sessionStore, Snapshot, ScreenshotEvent, TelemetryEvent } from '../sessions/sessionStore';
 import { validateExamCode } from '../routes/auth';
 
 /**
@@ -63,12 +63,20 @@ export function createWebSocketServer(server: Server): WebSocketServer {
                 if (event.type === 'SNAPSHOT') {
                     // Route snapshots to the dedicated snapshot list
                     sessionStore.addSnapshot(studentId, event as unknown as Snapshot);
+                } else if (event.type === 'SCREENSHOT' || event.type === 'SCREENSHOT_FAILED') {
+                    // Route screenshots to the dedicated screenshot list (keeps events[] slim)
+                    sessionStore.addScreenshot(studentId, event as unknown as ScreenshotEvent);
                 } else {
-                    // All other events (PASTE, KEYSTROKE, FOCUS_LOST, etc.) go to events[]
+                    // All other events (PASTE, KEYSTROKE_BATCH, FOCUS_LOST, TERMINAL_COMMAND, etc.) go to events[]
                     sessionStore.addEvent(studentId, event);
                 }
 
-                console.log(`[WS] ${event.type} from ${studentId}`);
+                // Don't log full screenshot payloads — they're huge
+                if (event.type === 'SCREENSHOT') {
+                    console.log(`[WS] SCREENSHOT from ${studentId} (${(event as { bytes?: number }).bytes ?? 0} bytes)`);
+                } else {
+                    console.log(`[WS] ${event.type} from ${studentId}`);
+                }
             } catch (err) {
                 console.warn(`[WS] Failed to parse message from ${studentId}:`, err);
             }

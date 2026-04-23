@@ -17,12 +17,27 @@ export type TelemetryEvent = {
 
 /**
  * A full-file snapshot captured by the extension every 60 seconds.
+ * `hash` is present on client builds that skip sending unchanged snapshots.
  */
 export type Snapshot = {
     type: 'SNAPSHOT';
     timeStamp: number;
     file: string;
     content: string;
+    hash?: string;
+};
+
+/**
+ * A screenshot event from the client's random screen-capture loop.
+ * On failure the event still arrives so the dashboard can show a gap.
+ */
+export type ScreenshotEvent = {
+    type: 'SCREENSHOT' | 'SCREENSHOT_FAILED';
+    timeStamp: number;
+    image?: string;       // base64 jpeg; empty when truncated or failed
+    bytes?: number;
+    truncated?: boolean;
+    reason?: string;      // populated on SCREENSHOT_FAILED
 };
 
 /**
@@ -34,6 +49,8 @@ export type Session = {
     joinedAt: number;
     events: TelemetryEvent[];
     snapshots: Snapshot[];
+    /** Screenshots stored separately so they don't bloat the events timeline. */
+    screenshots: ScreenshotEvent[];
     suspicionScore: number;
     /** Timestamp when the student last disconnected. null if active. */
     disconnectedAt: number | null;
@@ -51,7 +68,50 @@ const SUSPICION_FOCUS_WEIGHT = 20;
 const SUSPICION_FULLSCREEN_EXIT_WEIGHT = 10;
 const SUSPICION_FULLSCREEN_BLOCK_WEIGHT = 25;
 const SUSPICION_MACRO_WEIGHT = 15;
+const SUSPICION_EXTERNAL_FILE_WEIGHT = 15;
+const SUSPICION_MASS_DELETION_WEIGHT = 10;
 const MAX_SUSPICION_SCORE = 100;
+
+/**
+ * Event types whose payload carries its own `suspicionScore` field (client-
+ * computed). Summed directly into the total score so detectors can tune
+ * weight without a server deploy.
+ */
+const CLIENT_SCORED_EVENTS: ReadonlySet<string> = new Set([
+    'BULK_FIND_REPLACE',
+    'VELOCITY_SPIKE',
+    'GIT_SOLUTION_INJECTION',
+    'SUSPICIOUS_TERMINAL_COMMAND',
+    'AI_API_TERMINAL_COMMAND',
+    'WORKSPACE_CONFIG_CHANGED',
+]);
+
+/**
+ * Event types that trigger a score recalculation when received. Kept broad so
+ * the dashboard reflects every signal in near-real time.
+ */
+const SCORE_AFFECTING_TYPES: ReadonlySet<string> = new Set([
+    'PASTE',
+    'FOCUS_LOST',
+    'FULLSCREEN_EXIT',
+    'FULLSCREEN_BLOCKED',
+    'SUSPICIOUS_CADENCE',
+    'MASS_DELETION',
+    'EXTERNAL_FILE_OPENED',
+    'BULK_FIND_REPLACE',
+    'VELOCITY_SPIKE',
+    'GIT_SOLUTION_INJECTION',
+    'SUSPICIOUS_TERMINAL_COMMAND',
+    'AI_API_TERMINAL_COMMAND',
+    'WORKSPACE_CONFIG_CHANGED',
+    'LIVESHARE_ACTIVE',
+    'AI_EXTENSION_DETECTED',
+    'AI_EXTENSION_MID_SESSION',
+    'BROWSER_SESSION_BLOCKED',
+    'REMOTE_SESSION_DETECTED',
+    'EXAM_SUBMITTED',
+    'QUEUE_OVERFLOW',
+]);
 
 // ---------------------------------------------------------------------------
 // SessionStore
@@ -128,6 +188,7 @@ class SessionStore {
             disconnectedAt: null,
             events: [],
             snapshots: [],
+            screenshots: [],
             suspicionScore: 0,
             ws
         };
@@ -219,14 +280,7 @@ class SessionStore {
         session.events.push(event);
 
         // Recalculate and broadcast when a score-affecting event arrives
-        if (
-            event.type === 'PASTE' ||
-            event.type === 'FOCUS_LOST' ||
-            event.type === 'FULLSCREEN_EXIT' ||
-            event.type === 'FULLSCREEN_BLOCKED' ||
-            event.type === 'SUSPICIOUS_CADENCE' ||
-            event.type === 'EXAM_SUBMITTED'
-        ) {
+        if (SCORE_AFFECTING_TYPES.has(event.type)) {
             this.recalculateScore(session);
             this.broadcastUpdate();
         }
@@ -245,6 +299,22 @@ class SessionStore {
             return;
         }
         session.snapshots.push(snapshot);
+    }
+
+    /**
+     * Appends a screenshot event to the session's dedicated screenshot list.
+     * Kept out of `events[]` to avoid bloating the timeline with large base64 payloads.
+     *
+     * @param studentId  - The student whose screenshot this is
+     * @param screenshot - The screenshot event (success or failure)
+     */
+    addScreenshot(studentId: string, screenshot: ScreenshotEvent): void {
+        const session = this.sessions.get(studentId);
+        if (!session) {
+            console.warn(`[SessionStore] No session for ${studentId} — screenshot dropped`);
+            return;
+        }
+        session.screenshots.push(screenshot);
     }
 
     // -----------------------------------------------------------------------
@@ -298,18 +368,52 @@ class SessionStore {
     // -----------------------------------------------------------------------
 
     /**
-     * Recalculates the suspicion score for a session based on paste + focus loss counts.
+     * Recalculates the suspicion score for a session.
      *
-     * Formula (from implementation.md):
-     *   score = (pasteCount × 40) + (focusLossCount × 20), clamped to [0, 100]
+     * The score is the sum of:
+     *  - server-weighted event counts (PASTE, FOCUS_LOST, FULLSCREEN_*, MASS_DELETION, EXTERNAL_FILE_OPENED, SUSPICIOUS_CADENCE)
+     *  - client-computed `suspicionScore` fields on CLIENT_SCORED_EVENTS payloads
+     *  - DISCONNECT_PENALTY aggregate
+     *
+     * Critical flags (LiveShare active, AI extension detected, blocked browser, remote session)
+     * force the score to 100 immediately.
+     *
+     * Final result clamped to [0, 100].
      */
     private recalculateScore(session: Session): void {
+        // --- server-weighted counts ---
         const pasteCount = session.events.filter(e => e.type === 'PASTE').length;
         const focusLossCount = session.events.filter(e => e.type === 'FOCUS_LOST').length;
         const fullscreenExits = session.events.filter(e => e.type === 'FULLSCREEN_EXIT').length;
         const fullscreenBlocked = session.events.filter(e => e.type === 'FULLSCREEN_BLOCKED').length;
         const macroCount = session.events.filter(e => e.type === 'SUSPICIOUS_CADENCE').length;
-        const disconnectPenalty = session.events.filter(e => e.type === 'DISCONNECT_PENALTY').reduce((sum, e) => sum + ((e.penalty as number) || 0), 0);
+        const massDeletionCount = session.events.filter(e => e.type === 'MASS_DELETION').length;
+        const externalFileCount = session.events.filter(e => e.type === 'EXTERNAL_FILE_OPENED').length;
+
+        // --- aggregate DISCONNECT_PENALTY ---
+        const disconnectPenalty = session.events
+            .filter(e => e.type === 'DISCONNECT_PENALTY')
+            .reduce((sum, e) => sum + ((e.penalty as number) || 0), 0);
+
+        // --- client-computed score contributions ---
+        const clientScoreSum = session.events
+            .filter(e => CLIENT_SCORED_EVENTS.has(e.type))
+            .reduce((sum, e) => sum + (typeof e.suspicionScore === 'number' ? e.suspicionScore : 0), 0);
+
+        // --- critical flags that pin the score to 100 ---
+        const criticalFlag = session.events.some(e =>
+            e.type === 'LIVESHARE_ACTIVE' ||
+            e.type === 'AI_EXTENSION_DETECTED' ||
+            e.type === 'AI_EXTENSION_MID_SESSION' ||
+            e.type === 'BROWSER_SESSION_BLOCKED' ||
+            e.type === 'REMOTE_SESSION_DETECTED'
+        );
+
+        if (criticalFlag) {
+            session.suspicionScore = MAX_SUSPICION_SCORE;
+            console.log(`[SessionStore] ${session.studentId} suspicion score: ${session.suspicionScore} (critical flag)`);
+            return;
+        }
 
         const raw =
             (pasteCount * SUSPICION_PASTE_WEIGHT) +
@@ -317,9 +421,12 @@ class SessionStore {
             (fullscreenExits * SUSPICION_FULLSCREEN_EXIT_WEIGHT) +
             (fullscreenBlocked * SUSPICION_FULLSCREEN_BLOCK_WEIGHT) +
             (macroCount * SUSPICION_MACRO_WEIGHT) +
+            (massDeletionCount * SUSPICION_MASS_DELETION_WEIGHT) +
+            (externalFileCount * SUSPICION_EXTERNAL_FILE_WEIGHT) +
+            clientScoreSum +
             disconnectPenalty;
 
-        session.suspicionScore = Math.min(raw, MAX_SUSPICION_SCORE);
+        session.suspicionScore = Math.min(Math.max(raw, 0), MAX_SUSPICION_SCORE);
 
         console.log(`[SessionStore] ${session.studentId} suspicion score: ${session.suspicionScore}`);
     }

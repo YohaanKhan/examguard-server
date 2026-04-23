@@ -498,8 +498,46 @@
             border-color: #21262d
         }
 
+        .event-item.KEYSTROKE_BATCH {
+            border-color: #21262d
+        }
+
         .event-item.SNAPSHOT {
             border-color: #bc8cff
+        }
+
+        .event-item.TERMINAL_COMMAND {
+            border-color: #f0c674
+        }
+
+        .event-item.TERMINAL_COMMAND_EXIT {
+            border-color: #8b949e
+        }
+
+        .event-item.SCREENSHOT {
+            border-color: #56d364
+        }
+
+        .event-item.SCREENSHOT_FAILED {
+            border-color: #f85149
+        }
+
+        .event-item.BULK_FIND_REPLACE,
+        .event-item.MASS_DELETION,
+        .event-item.VELOCITY_SPIKE,
+        .event-item.GIT_SOLUTION_INJECTION,
+        .event-item.SUSPICIOUS_TERMINAL_COMMAND,
+        .event-item.AI_API_TERMINAL_COMMAND,
+        .event-item.EXTERNAL_FILE_OPENED,
+        .event-item.WORKSPACE_CONFIG_CHANGED,
+        .event-item.LIVESHARE_ACTIVE,
+        .event-item.AI_EXTENSION_DETECTED,
+        .event-item.AI_EXTENSION_MID_SESSION,
+        .event-item.BROWSER_SESSION_BLOCKED,
+        .event-item.REMOTE_SESSION_DETECTED,
+        .event-item.QUEUE_OVERFLOW,
+        .event-item.SUSPICIOUS_CADENCE {
+            border-color: #f85149
         }
 
         .event-badge {
@@ -532,7 +570,8 @@
             color: #388bfd
         }
 
-        .badge-KEYSTROKE {
+        .badge-KEYSTROKE,
+        .badge-KEYSTROKE_BATCH {
             background: rgba(125, 133, 144, 0.12);
             color: #7d8590
         }
@@ -540,6 +579,41 @@
         .badge-SNAPSHOT {
             background: rgba(188, 140, 255, 0.15);
             color: #bc8cff
+        }
+
+        .badge-TERMINAL_COMMAND {
+            background: rgba(240, 198, 116, 0.15);
+            color: #f0c674
+        }
+
+        .badge-TERMINAL_COMMAND_EXIT {
+            background: rgba(139, 148, 158, 0.15);
+            color: #8b949e
+        }
+
+        .badge-SCREENSHOT {
+            background: rgba(86, 211, 100, 0.15);
+            color: #56d364
+        }
+
+        .badge-SCREENSHOT_FAILED,
+        .badge-BULK_FIND_REPLACE,
+        .badge-MASS_DELETION,
+        .badge-VELOCITY_SPIKE,
+        .badge-GIT_SOLUTION_INJECTION,
+        .badge-SUSPICIOUS_TERMINAL_COMMAND,
+        .badge-AI_API_TERMINAL_COMMAND,
+        .badge-EXTERNAL_FILE_OPENED,
+        .badge-WORKSPACE_CONFIG_CHANGED,
+        .badge-LIVESHARE_ACTIVE,
+        .badge-AI_EXTENSION_DETECTED,
+        .badge-AI_EXTENSION_MID_SESSION,
+        .badge-BROWSER_SESSION_BLOCKED,
+        .badge-REMOTE_SESSION_DETECTED,
+        .badge-QUEUE_OVERFLOW,
+        .badge-SUSPICIOUS_CADENCE {
+            background: rgba(248, 81, 73, 0.15);
+            color: #f85149
         }
 
         .event-content {
@@ -1430,8 +1504,7 @@
             if (!filtered.length) { empty.style.display = ''; table.style.display = 'none'; return }
             empty.style.display = 'none'; table.style.display = '';
             tbody.innerHTML = filtered.map(s => {
-                const pastes = count(s.events, 'PASTE'), focusLoss = count(s.events, 'FOCUS_LOST'), keystrokes = count(s.events,
-                    'KEYSTROKE'), sc = s.suspicionScore;
+                const pastes = count(s.events, 'PASTE'), focusLoss = count(s.events, 'FOCUS_LOST'), keystrokes = sumKeystrokes(s.events), sc = s.suspicionScore;
                 const warnings = count(s.events, 'WARNING_ISSUED') + count(s.events, 'FULLSCREEN_BLOCKED');
                 const barColor = sc >= 70 ? '#f85149' : sc >= 40 ? '#e08e45' : '#3fb950';
 
@@ -1489,8 +1562,7 @@
             const sc = data.suspicionScore;
             const scoreColor = sc >= 70 ? '#f85149' : sc >= 40 ? '#e08e45' : '#3fb950';
             const scoreBg = sc >= 70 ? 'rgba(248,81,73,0.15)' : sc >= 40 ? 'rgba(224,142,69,0.15)' : 'rgba(63,185,80,0.15)';
-            const pastes = count(data.events, 'PASTE'), focusLoss = count(data.events, 'FOCUS_LOST'), keystrokes =
-                count(data.events, 'KEYSTROKE'), snapshots = data.snapshots || [];
+            const pastes = count(data.events, 'PASTE'), focusLoss = count(data.events, 'FOCUS_LOST'), keystrokes = sumKeystrokes(data.events), snapshots = data.snapshots || [];
             const warnings = count(data.events, 'WARNING_ISSUED') + count(data.events, 'FULLSCREEN_BLOCKED');
 
             document.getElementById('detail-score-circle').textContent = sc;
@@ -1618,6 +1690,50 @@
                     if (e.content) {
                         extra += `<div class="paste-preview" style="border-left-color:#388bfd;background:rgba(56,139,253,0.05)">${escHtml(String(e.content))}</div>`;
                     }
+                }
+                if (e.type === 'KEYSTROKE_BATCH') {
+                    const chars = typeof e.chars === 'number' ? e.chars : 0;
+                    const file = e.file ? String(e.file).split('/').pop() : '—';
+                    extra = `<div style="color:#7d8590;font-size:11px;margin-top:2px">${chars} chars in ${file}</div>`;
+                }
+                if (e.type === 'TERMINAL_COMMAND' || e.type === 'SUSPICIOUS_TERMINAL_COMMAND' || e.type === 'AI_API_TERMINAL_COMMAND') {
+                    const cmd = e.command ? escHtml(String(e.command)) : '<em>unresolved</em>';
+                    const shell = e.shell ? `<span style="color:#7d8590">[${escHtml(String(e.shell))}]</span> ` : '';
+                    extra = `<div class="paste-preview" style="border-left-color:#f0c674;background:rgba(240,198,116,0.08);color:#f0c674">${shell}${cmd}</div>`;
+                }
+                if (e.type === 'TERMINAL_COMMAND_EXIT') {
+                    extra = `<div style="color:#7d8590;font-size:11px;margin-top:2px">exit code ${e.exitCode ?? '?'}</div>`;
+                }
+                if (e.type === 'SCREENSHOT') {
+                    const bytes = typeof e.bytes === 'number' ? e.bytes : 0;
+                    extra = `<div style="color:#7d8590;font-size:11px;margin-top:2px">${(bytes / 1024).toFixed(1)} KB captured</div>`;
+                }
+                if (e.type === 'SCREENSHOT_FAILED') {
+                    extra = `<div style="color:#f85149;font-size:11px;margin-top:2px">${escHtml(String(e.reason ?? 'unknown error'))}</div>`;
+                }
+                if (e.type === 'EXTERNAL_FILE_OPENED' && e.file) {
+                    extra = `<div style="color:#f85149;font-size:11px;margin-top:2px">opened outside workspace: ${escHtml(String(e.file))}</div>`;
+                }
+                if (e.type === 'BULK_FIND_REPLACE') {
+                    extra = `<div style="color:#f85149;font-size:11px;margin-top:2px">${e.replacements ?? '?'} replacements</div>`;
+                }
+                if (e.type === 'MASS_DELETION') {
+                    extra = `<div style="color:#f85149;font-size:11px;margin-top:2px">${e.charsDeleted ?? '?'} chars removed</div>`;
+                }
+                if (e.type === 'VELOCITY_SPIKE') {
+                    extra = `<div style="color:#f85149;font-size:11px;margin-top:2px">${e.charsPerSecond ?? '?'} chars/sec</div>`;
+                }
+                if (e.type === 'GIT_SOLUTION_INJECTION') {
+                    extra = `<div style="color:#f85149;font-size:11px;margin-top:2px">${escHtml(String(e.source ?? 'git operation'))}</div>`;
+                }
+                if (e.type === 'WORKSPACE_CONFIG_CHANGED' && e.file) {
+                    extra = `<div style="color:#f85149;font-size:11px;margin-top:2px">${escHtml(String(e.file))}</div>`;
+                }
+                if (e.type === 'QUEUE_OVERFLOW') {
+                    extra = `<div style="color:#f85149;font-size:11px;margin-top:2px">dropped ${e.dropped ?? '?'} events</div>`;
+                }
+                if ((e.type === 'AI_EXTENSION_DETECTED' || e.type === 'AI_EXTENSION_MID_SESSION') && e.extensionId) {
+                    extra = `<div style="color:#f85149;font-size:11px;margin-top:2px">${escHtml(String(e.extensionId))}</div>`;
                 }
                 return `<div class="event-item ${e.type}"><span class="event-badge badge-${typeKey}">${e.type}</span>
                 <div class="event-content"><span class="event-time">${time}</span>${extra}</div>
@@ -1779,6 +1895,11 @@
         document.getElementById('back-btn').addEventListener('click', showOverview);
 
         function count(events, type) { return (events || []).filter(e => e.type === type).length }
+        function sumKeystrokes(events) {
+            return (events || [])
+                .filter(e => e.type === 'KEYSTROKE_BATCH')
+                .reduce((sum, e) => sum + (typeof e.chars === 'number' ? e.chars : 0), 0);
+        }
         function escHtml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }
         function guessLang(file) {
             if (file.endsWith('.py')) return 'python'; if (file.endsWith('.js')) return
